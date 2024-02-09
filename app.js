@@ -14,7 +14,6 @@ const privateKeyPath = process.env.PRIVATE_KEY_PATH
 const privateKey = fs.readFileSync(privateKeyPath, 'utf8')
 const secret = process.env.WEBHOOK_SECRET
 const enterpriseHostname = process.env.ENTERPRISE_HOSTNAME
-const messageForNewPRs = fs.readFileSync('./message.md', 'utf8')
 const pubsubTopicName = process.env.PUBSUB_TOPIC_NAME
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
 
@@ -66,7 +65,9 @@ app.webhooks.on('issues.reopened', async ({ octokit, payload }) => {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
       issue_number: payload.issue.number,
-      body: messageForNewPRs
+      body:
+        `We have received your request to generate a docker file for the repository ${repo_name}.\n` +
+        `We will post the generated docker file once it's ready.`
     })
   } catch (error) {
     if (error.response) {
