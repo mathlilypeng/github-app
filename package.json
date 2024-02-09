@@ -1,0 +1,20 @@
+{
+  "name": "starter_github_app",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "server": "node app.js",
+    "lint": "standard"
+  },
+  "devDependencies": {
+    "smee-client": "^1.2.3",
+    "standard": "^17.0.0",
+    "vite": "^4.5.2"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "^4.3.1",
+    "dotenv": "^16.0.3",
+    "octokit": "^3.1.2"
+  }
+}
