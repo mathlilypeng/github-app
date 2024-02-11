@@ -16,6 +16,8 @@ const secret = process.env.WEBHOOK_SECRET
 const enterpriseHostname = process.env.ENTERPRISE_HOSTNAME
 const pubsubTopicName = process.env.PUBSUB_TOPIC_NAME
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
+const buildResultSubscription = process.env.BUILD_RESULT_SUBSCRIPTION
+
 
 // Create an authenticated Octokit client authenticated as a GitHub App
 const app = new App({
@@ -45,6 +47,11 @@ async function publishMessage(message) {
   }
 }
 
+// Receive build result from Google PubSub
+async function handleMessage(message) {
+  console.log(`Received message: ${message.data}`);
+  message.ack();
+}
 
 // Optional: Get & log the authenticated app's name
 const { data } = await app.octokit.request('/app')
@@ -88,6 +95,11 @@ app.webhooks.onError((error) => {
   }
 })
 
+const subscription = pubsubClient.subscription(buildResultSubscription)
+// Start listening for messages
+subscription.on('message', handleMessage)
+subscription.on('error', (err) => console.error(`Recived error while listening to ${buildResultSubscription}. Error: ${err}`))
+
 // Launch a web server to listen for GitHub webhooks
 const port = process.env.PORT || 3000
 const path = '/api/webhook'
@@ -98,5 +110,6 @@ const middleware = createNodeMiddleware(app.webhooks, { path })
 
 http.createServer(middleware).listen(port, () => {
   console.log(`Server is listening for events at: ${localWebhookUrl}`)
+  console.log(`Server is subscribing events from Google Pub/Sub at: ${buildResultSubscription}`)
   console.log('Press Ctrl + C to quit.')
 })
