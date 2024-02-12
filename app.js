@@ -17,6 +17,7 @@ const enterpriseHostname = process.env.ENTERPRISE_HOSTNAME
 const pubsubTopicName = process.env.PUBSUB_TOPIC_NAME
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
 const buildResultSubscription = process.env.BUILD_RESULT_SUBSCRIPTION
+const personalAccessToken = process.env.PERSONAL_ACCESS_TOKEN
 
 
 // Create an authenticated Octokit client authenticated as a GitHub App
@@ -47,9 +48,49 @@ async function publishMessage(message) {
   }
 }
 
+function escapeMarkdown(text) {
+  // You can add more special characters to this if needed
+  return text.replace(/([_*`])/g, '\\$1');  
+}
+
+function formatBuildResultMessage(rawResponseData) {
+  const responseData = rawResponseData.toString('utf8')
+  console.log("Raw data:", responseData);
+  const messages = JSON.parse(responseData)
+  const formattedMessages = []
+  messages.forEach((message) => {
+    console.log("Message:", message);
+    console.log("Dockerfile:", message.docker_file);
+    console.log("Build Success:", message.build_success);
+    console.log("Error Logs:", message.error_logs);
+    const formattedMessage = `Docker File:\n\`\`\`\n${escapeMarkdown(message.docker_file)}\n\`\`\`
+    Build Success: ${message.build_success}
+    Error Message: ${message.error_logs}`
+    formattedMessages.push(formattedMessage)
+  })
+  return formattedMessages
+}
+
 // Receive build result from Google PubSub
 async function handleMessage(message) {
   console.log(`Received message: ${message.data}`);
+  // Create an Octokit instance authenticated with your personal access token
+  const octokit = new Octokit({ auth: personalAccessToken });
+  const commentBody = formatBuildResultMessage(message.data).join("\n")
+  try {
+    await octokit.rest.issues.createComment({
+      owner: "mathlilypeng",
+      repo: "pubsub-hello-world",
+      issue_number: 1,
+      body: commentBody
+    })
+  } catch (error) {
+    if (error.response) {
+      console.error(`Error! Status: ${error.response.status}. Message: ${error.response.data.message}`)
+    } else {
+      console.error(`Recived error while posting a comment to the issue: ${error.message}`)
+    }
+  }
   message.ack();
 }
 
@@ -73,8 +114,8 @@ app.webhooks.on('issues.reopened', async ({ octokit, payload }) => {
       repo: payload.repository.name,
       issue_number: payload.issue.number,
       body:
-        `We have received your request to generate a docker file for the repository ${repo_name}.\n` +
-        `We will post the generated docker file once it's ready.`
+        `We have received your request to generate a docker file for the repository ${repo_name}.
+         We will post the generated docker file once it's ready.`
     })
   } catch (error) {
     if (error.response) {
