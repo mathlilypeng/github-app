@@ -4,6 +4,7 @@ import http from 'http'
 import { Octokit, App } from 'octokit'
 import { createNodeMiddleware } from '@octokit/webhooks'
 import { PubSub } from '@google-cloud/pubsub'
+import { createAppAuth } from '@octokit/auth-app'
 
 // Load environment variables from .env file
 dotenv.config()
@@ -17,7 +18,7 @@ const enterpriseHostname = process.env.ENTERPRISE_HOSTNAME
 const pubsubTopicName = process.env.PUBSUB_TOPIC_NAME
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
 const buildResultSubscription = process.env.BUILD_RESULT_SUBSCRIPTION
-const personalAccessToken = process.env.PERSONAL_ACCESS_TOKEN
+const installationId = process.env.INSTALLATION_ID
 
 
 // Create an authenticated Octokit client authenticated as a GitHub App
@@ -50,7 +51,7 @@ async function publishMessage(message) {
 
 function escapeMarkdown(text) {
   // You can add more special characters to this if needed
-  return text.replace(/([_*`])/g, '\\$1');  
+  return text.replace(/([_*`])/g, '\\$1');
 }
 
 function formatBuildResultMessage(rawResponseData) {
@@ -75,13 +76,24 @@ function formatBuildResultMessage(rawResponseData) {
 async function handleMessage(message) {
   console.log(`Received message: ${message.data}`);
   // Create an Octokit instance authenticated with your personal access token
-  const octokit = new Octokit({ auth: personalAccessToken });
+  const auth = createAppAuth({
+    appId,
+    privateKey,
+    installationId,
+  })
+  const octokit = new Octokit({
+    authStrategy: createAppAuth, auth: {
+      appId: appId,
+      privateKey: privateKey,
+      installationId: installationId
+    }
+  });
   const commentBody = formatBuildResultMessage(message.data).join("\n")
   try {
     await octokit.rest.issues.createComment({
       owner: "mathlilypeng",
       repo: "pubsub-hello-world",
-      issue_number: 1,
+      issue_number: 6,
       body: commentBody
     })
   } catch (error) {
@@ -102,7 +114,7 @@ app.octokit.log.debug(`Authenticated as '${data.name}'`)
 
 // Subscribe to the "issues.opened" webhook event.
 // See https://docs.github.com/en/webhooks/webhook-events-and-payloads for more webhook events.
-app.webhooks.on('issues.reopened', async ({ octokit, payload }) => {
+app.webhooks.on('issues.opened', async ({ octokit, payload }) => {
   let repo_name = payload.repository.full_name
   console.log(`Received a issue reopened event for ${repo_name} #${payload.issue.number}`)
 
