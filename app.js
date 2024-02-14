@@ -39,10 +39,10 @@ const app = new App({
 const pubsubClient = new PubSub({ cloudProjectId });
 
 // Publish message to Google PubSub
-async function publishMessage(message) {
+async function publishMessage(issueInfo) {
   try {
     console.log(`Publishing message to ${pubsubTopicName}.`)
-    const messageId = await pubsubClient.topic(pubsubTopicName).publishMessage({ data: Buffer.from(message) })
+    const messageId = await pubsubClient.topic(pubsubTopicName).publishMessage({ data: Buffer.from(JSON.stringify(issueInfo)) })
     console.log(`Message #${messageId} published.`)
   } catch (error) {
     console.error(`Received error while publishing: ${error.message}`)
@@ -115,10 +115,16 @@ app.octokit.log.debug(`Authenticated as '${data.name}'`)
 // Subscribe to the "issues.opened" webhook event.
 // See https://docs.github.com/en/webhooks/webhook-events-and-payloads for more webhook events.
 app.webhooks.on('issues.opened', async ({ octokit, payload }) => {
-  let repo_name = payload.repository.full_name
-  console.log(`Received a issue reopened event for ${repo_name} #${payload.issue.number}`)
+  const issueInfo = {
+    "repo_name": payload.repository.full_name,
+    "repo_owner": payload.repository.owner.login,
+    "issue_number": payload.issue.number,
+    "installation_id": payload.installation.id,
+  }
 
-  await publishMessage(repo_name)
+  console.log(`Received a issue reopened event for ${issueInfo.repo_name} #${payload.issue.number}`)
+
+  await publishMessage(issueInfo)
 
   try {
     await octokit.rest.issues.createComment({
@@ -126,7 +132,7 @@ app.webhooks.on('issues.opened', async ({ octokit, payload }) => {
       repo: payload.repository.name,
       issue_number: payload.issue.number,
       body:
-        `We have received your request to generate a docker file for the repository ${repo_name}.
+        `We have received your request to generate a docker file for the repository ${issueInfo.repo_name}.
          We will post the generated docker file once it's ready.`
     })
   } catch (error) {
