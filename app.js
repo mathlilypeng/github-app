@@ -54,19 +54,12 @@ function escapeMarkdown(text) {
   return text.replace(/([_*`])/g, '\\$1');
 }
 
-function formatBuildResultMessage(rawResponseData) {
-  const responseData = rawResponseData.toString('utf8')
-  console.log("Raw data:", responseData);
-  const messages = JSON.parse(responseData)
+function formatBuildResultMessage(messageJson) {
   const formattedMessages = []
-  messages.forEach((message) => {
-    console.log("Message:", message);
-    console.log("Dockerfile:", message.docker_file);
-    console.log("Build Success:", message.build_success);
-    console.log("Error Logs:", message.error_logs);
-    const formattedMessage = `Docker File:\n\`\`\`\n${escapeMarkdown(message.docker_file)}\n\`\`\`
-    Build Success: ${message.build_success}
-    Error Message: ${message.error_logs}`
+  messageJson.history.forEach((historyItem) => {
+    const formattedMessage = `Docker File:\n\`\`\`\n${escapeMarkdown(historyItem.docker_file)}\n\`\`\`
+    Build Success: ${historyItem.build_success}
+    Error Message: ${historyItem.error_logs}`
     formattedMessages.push(formattedMessage)
   })
   return formattedMessages
@@ -74,26 +67,22 @@ function formatBuildResultMessage(rawResponseData) {
 
 // Receive build result from Google PubSub
 async function handleMessage(message) {
-  console.log(`Received message: ${message.data}`);
-  // Create an Octokit instance authenticated with your personal access token
-  const auth = createAppAuth({
-    appId,
-    privateKey,
-    installationId,
-  })
+  const messageStr = message.data.toString('utf8')
+  console.log(`Received message: ${messageStr}`);
+  const messageJson = JSON.parse(messageStr)
   const octokit = new Octokit({
     authStrategy: createAppAuth, auth: {
       appId: appId,
       privateKey: privateKey,
-      installationId: installationId
+      installationId: messageJson.issueInfo.installation_id
     }
   });
-  const commentBody = formatBuildResultMessage(message.data).join("\n")
+  const commentBody = formatBuildResultMessage(messageJson).join("\n")
   try {
     await octokit.rest.issues.createComment({
-      owner: "mathlilypeng",
-      repo: "pubsub-hello-world",
-      issue_number: 6,
+      owner: messageJson.issueInfo.repo_owner,
+      repo: messageJson.issueInfo.repo_name,
+      issue_number: messageJson.issueInfo.issue_number,
       body: commentBody
     })
   } catch (error) {
@@ -116,7 +105,8 @@ app.octokit.log.debug(`Authenticated as '${data.name}'`)
 // See https://docs.github.com/en/webhooks/webhook-events-and-payloads for more webhook events.
 app.webhooks.on('issues.opened', async ({ octokit, payload }) => {
   const issueInfo = {
-    "repo_name": payload.repository.full_name,
+    "repo_full_name": payload.repository.full_name,
+    "repo_name": payload.repository.name,
     "repo_owner": payload.repository.owner.login,
     "issue_number": payload.issue.number,
     "installation_id": payload.installation.id,
