@@ -7,7 +7,7 @@ import { createAppAuth } from '@octokit/auth-app'
 // Load environment variables from .env file
 dotenv.config()
 
-const buildResultSubscriptionTopic = process.env.BUILD_RESULT_SUBSCRIPTION_TOPIC
+const buildResultTopic = process.env.BOB_THE_BUILDER_RESULT_TOPIC
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
 const appId = process.env.APP_ID
 const privateKeyPath = process.env.PRIVATE_KEY_PATH
@@ -62,7 +62,7 @@ async function onBobTheBuilderResult(message) {
 
 async function createBobTheBuilderResultSubscription() {
   const pubsubClient = new PubSub({ cloudProjectId });
-  const subscription = pubsubClient.subscription(buildResultSubscriptionTopic)
+  const subscription = pubsubClient.subscription(buildResultTopic)
   // Start listening for messages
   subscription.on('message', onBobTheBuilderResult)
   subscription.on('error', (error) => console.error(`Recived error while listening to ${buildResultSubscription}. Error: ${error}`))

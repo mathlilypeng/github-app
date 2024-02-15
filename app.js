@@ -38,7 +38,7 @@ app.octokit.log.debug(`Authenticated as '${data.name}'`)
 
 // Subscribe to the "issues.opened" webhook event.
 // See https://docs.github.com/en/webhooks/webhook-events-and-payloads for more webhook events.
-app.webhooks.on('issues.reopened', issueHandlers.onIssueOpened)
+app.webhooks.on('issues.opened', issueHandlers.onIssueOpened)
 
 // Optional: Handle errors
 app.webhooks.onError((error) => {
