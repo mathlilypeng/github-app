@@ -15,35 +15,6 @@ const cloudProjectId = process.env.CLOUD_PROJECT_ID
 const appId = process.env.APP_ID
 const privateKeyPath = process.env.PRIVATE_KEY_PATH
 const privateKey = fs.readFileSync(privateKeyPath, 'utf8')
-const unifiedDiff = dedent`
---- a/main.py
-+++ b/main.py
-@@ -1,5 +1,10 @@
- """
- This script subscribes to a Pub/Sub topic and prints the message data.
-+
-+It uses the Google Cloud Pub/Sub library to create a subscriber client and
-+subscribe to a topic. The callback function is called for each message received
-+and prints the message data.
-+
- """
- import os
- from google.cloud import pubsub_v1
-@@ -10,6 +15,7 @@ def callback_fun(message: pubsub_v1.subscriber.message.Message):
- """
- This function is called for each message received by the subscriber.
- 
-+Args:
- message: The message received by the subscriber.
- """
- print(message.data)
-@@ -17,6 +23,7 @@ def main(_):
- """
- This is the main function of the script.
- 
-+It creates a subscriber client, subscribes to a topic, and waits for messages.
- """
- `
 
 function escapeMarkdown(text) {
   // You can add more special characters to this if needed
@@ -84,7 +55,8 @@ async function onBobTheBuilderResult(message) {
     })
   } catch (error) {
     if (error.response) {
-      console.error(`Error! Status: ${error.response.status}. Message: ${error.response.data.message}`)
+      console.error(
+        `Error! Status: ${error.response.status}. Message: ${error.response.data.message}`)
     } else {
       console.error(`Received error while posting a comment to the issue: ${error.message}`)
     }
@@ -104,28 +76,27 @@ async function onPatchGenerationResult(message) {
       installationId: patchResult.issueInfo.installation_id
     }
   })
-  // Create a new branch
-  let baseBranchSha
-  try {
-    baseBranchSha = await octokit.rest.git.getRef({
-      owner: patchResult.issueInfo.repo_owner,
-      repo: patchResult.issueInfo.repo_name,
-      ref: "heads/main"
-    }).then(response => response.data.object.sha)
-      .catch(error =>
-        console.error(`Received error while getting the ref: ${error}`))
-    console.info(`Retrived the base branch sha: ${baseBranchSha}`)
-    const newBranchName = `feature-${patchResult.issueInfo.issue_number}-${uuidv4()}`
-    await octokit.rest.git.createRef({
-      owner: patchResult.issueInfo.repo_owner,
-      repo: patchResult.issueInfo.repo_name,
-      ref: `refs/heads/${newBranchName}`,
-      sha: baseBranchSha,
-    })
-    console.log(`New branch '${newBranchName}' created successfully!`);
-  } catch (error) {
-    console.error(`Received error while creating a new branch: ${error}`)
-  }
+  // Get the base branch sha
+  const baseBranchName = "main"
+  const baseBranchSha = await octokit.rest.git.getRef({
+    owner: patchResult.issueInfo.repo_owner,
+    repo: patchResult.issueInfo.repo_name,
+    ref: `heads/${baseBranchName}`
+  }).then(response => response.data.object.sha)
+    .catch(error =>
+      console.error(
+        `Received error while getting the ref for "heads/${baseBranchName}": ${error}`));
+
+  // Create a new branch based on the base branch sha
+  const newBranchName = `feature-${patchResult.issueInfo.issue_number}-${uuidv4()}`
+  await octokit.rest.git.createRef({
+    owner: patchResult.issueInfo.repo_owner,
+    repo: patchResult.issueInfo.repo_name,
+    ref: `refs/heads/${newBranchName}`,
+    sha: baseBranchSha,
+  }).then(() => console.log(`New branch '${newBranchName}' created successfully!`))
+    .catch(error => console.error(
+      `Received error while creating a new branch ${newBranchName}. Error: ${error}`));
 
   // Process the unified diff
   const patch = diff.parsePatch(patchResult.unifiedDiff);
@@ -139,7 +110,11 @@ async function onPatchGenerationResult(message) {
       `Received error while getting content for ${filePatch.oldFileName}. Error: ${error}`))
       .then(response => {
         const originalContent = Buffer.from(response.data.content, 'base64').toString('utf-8')
-        const updatedContent = diff.applyPatch(originalContent, filePatch)
+        const update = diff.applyPatch(originalContent, filePatch)
+        if (update === false) {
+          throw new Error(`Failed to apply the patch.`)
+        }
+        const updatedContent = update
         return octokit.rest.repos.createOrUpdateFileContents({
           owner: patchResult.issueInfo.repo_owner,
           repo: patchResult.issueInfo.repo_name,
@@ -150,15 +125,27 @@ async function onPatchGenerationResult(message) {
             name: "AIDA",
             email: "github-actions@github.com"
           },
-          sha: response.data.sha
+          sha: response.data.sha,
+          branch: newBranchName
         })
       })
       .catch(error => console.error(`
       Received error while updating ${filePatch.oldFileName} to ${filePatch.newFileName}. Error: ${error}`))
   })
-  Promise.all(fileUpdatePromises)
+
+  await Promise.all(fileUpdatePromises)
     .then(() => console.info("File updated successfully."))
-    .catch(error => console.error(`Received error while updating the files: ${error}`))
+    .catch(error => console.error(`Received error while updating the files: ${error}`));
+
+  octokit.rest.pulls.create({
+    owner: patchResult.issueInfo.repo_owner,
+    repo: patchResult.issueInfo.repo_name,
+    title: `Fix for issue #${patchResult.issueInfo.issue_number}`,
+    head: newBranchName,
+    base: baseBranchName  // Or your target branch
+  })
+    .then(response => console.info(`Created a PR: ${response.data.html_url}`))
+    .catch(error => console.error(`Received error while creating a pull request: ${error}`))
 }
 
 async function createBobTheBuilderResultSubscription() {
@@ -171,6 +158,21 @@ async function createBobTheBuilderResultSubscription() {
 }
 
 async function createPatchGenerationResultSubscription() {
+  const unifiedDiff = dedent`
+  --- a/main.py
+  +++ b/main.py
+  @@ -1,3 +1,11 @@
+  +"""
+  +This script subscribes to a Pub/Sub topic and prints the message data.
+  +
+  +It uses the Google Cloud Pub/Sub library to create a subscriber client and
+  +subscribe to a topic. The callback function is called for each message received
+  +and prints the message data.
+  +
+  +"""
+   import os
+   from google.cloud import pubsub_v1
+   `
   const message = {
     "issueInfo": {
       "repo_owner": "mathlilypeng",
