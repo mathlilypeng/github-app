@@ -129,20 +129,18 @@ async function onPatchGenerationResult(message) {
 
   // Process the unified diff
   const patch = diff.parsePatch(patchResult.unifiedDiff);
-  patch.forEach(filePatch => {
-    if (filePatch.oldFileName !== '/dev/null') {
-      octokit.rest.repos.getContent({
-        owner: patchResult.issueInfo.repo_owner,
-        repo: patchResult.issueInfo.repo_name,
-        path: filePatch.oldFileName.slice(2), // Or filePatch.newFileName if they match
-        ref: baseBranchSha,
-      }).then(response => {
-        console.info(`Retrived the file content ${response.data.name}`)
+  const fileUpdatePromises = patch.map(filePatch => {
+    return octokit.rest.repos.getContent({
+      owner: patchResult.issueInfo.repo_owner,
+      repo: patchResult.issueInfo.repo_name,
+      path: filePatch.oldFileName.slice(2), // Or filePatch.newFileName if they match
+      ref: baseBranchSha,
+    }).catch(error => console.error(
+      `Received error while getting content for ${filePatch.oldFileName}. Error: ${error}`))
+      .then(response => {
         const originalContent = Buffer.from(response.data.content, 'base64').toString('utf-8')
-        console.info(`Converted the file content to utf-8 string.`)
         const updatedContent = diff.applyPatch(originalContent, filePatch)
-        console.info(`Patch applied successfully.`)
-        octokit.rest.repos.createOrUpdateFileContents({
+        return octokit.rest.repos.createOrUpdateFileContents({
           owner: patchResult.issueInfo.repo_owner,
           repo: patchResult.issueInfo.repo_name,
           path: filePatch.oldFileName.slice(2),
@@ -150,18 +148,17 @@ async function onPatchGenerationResult(message) {
           content: Buffer.from(updatedContent).toString('base64'),
           committer: {
             name: "AIDA",
-            email: "github-actions@github.com)"
+            email: "github-actions@github.com"
           },
           sha: response.data.sha
         })
-        console.info(`Done createOrUpdateFileContents.`)
-      }).then(console.info("File updated successfully."))
-        .catch(error => console.error(`Received error while updating the files: ${error}`))
-    } else {
-      // Handle newly added files
-      console.info(`Found a patch that adds a new file.\n${filePatch.hunks}`)
-    }
+      })
+      .catch(error => console.error(`
+      Received error while updating ${filePatch.oldFileName} to ${filePatch.newFileName}. Error: ${error}`))
   })
+  Promise.all(fileUpdatePromises)
+    .then(() => console.info("File updated successfully."))
+    .catch(error => console.error(`Received error while updating the files: ${error}`))
 }
 
 async function createBobTheBuilderResultSubscription() {
