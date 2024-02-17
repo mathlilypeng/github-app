@@ -60,6 +60,7 @@ async function onBobTheBuilderResult(message) {
     } else {
       console.error(`Received error while posting a comment to the issue: ${error.message}`)
     }
+    return
   }
   message.ack();
 }
@@ -83,9 +84,9 @@ async function onPatchGenerationResult(message) {
     repo: patchResult.issueInfo.repo_name,
     ref: `heads/${baseBranchName}`
   }).then(response => response.data.object.sha)
-    .catch(error =>
-      console.error(
-        `Received error while getting the ref for "heads/${baseBranchName}": ${error}`));
+    .catch(error => {
+      throw new Error(`Received error while getting the ref for "heads/${baseBranchName}": ${error}`)
+    });
 
   // Create a new branch based on the base branch sha
   const newBranchName = `feature-${patchResult.issueInfo.issue_number}-${uuidv4()}`
@@ -95,8 +96,9 @@ async function onPatchGenerationResult(message) {
     ref: `refs/heads/${newBranchName}`,
     sha: baseBranchSha,
   }).then(() => console.log(`New branch '${newBranchName}' created successfully!`))
-    .catch(error => console.error(
-      `Received error while creating a new branch ${newBranchName}. Error: ${error}`));
+    .catch(error => {
+      throw new Error(`Received error while creating a new branch ${newBranchName}. Error: ${error}`);
+    });
 
   // Process the unified diff
   const patch = diff.parsePatch(patchResult.unifiedDiff);
@@ -104,10 +106,11 @@ async function onPatchGenerationResult(message) {
     return octokit.rest.repos.getContent({
       owner: patchResult.issueInfo.repo_owner,
       repo: patchResult.issueInfo.repo_name,
-      path: filePatch.oldFileName.slice(2), // Or filePatch.newFileName if they match
+      path: filePatch.oldFileName.slice(2),
       ref: baseBranchSha,
-    }).catch(error => console.error(
-      `Received error while getting content for ${filePatch.oldFileName}. Error: ${error}`))
+    }).catch(error => {
+      throw new Error(`Received error while getting content for ${filePatch.oldFileName}. Error: ${error}`);
+    })
       .then(response => {
         const originalContent = Buffer.from(response.data.content, 'base64').toString('utf-8')
         const update = diff.applyPatch(originalContent, filePatch)
@@ -129,13 +132,14 @@ async function onPatchGenerationResult(message) {
           branch: newBranchName
         })
       })
-      .catch(error => console.error(`
-      Received error while updating ${filePatch.oldFileName} to ${filePatch.newFileName}. Error: ${error}`))
+      .catch(error => {
+        throw new Error(`
+      Received error while updating ${filePatch.oldFileName} to ${filePatch.newFileName}. Error: ${error}`);
+      })
   })
 
   await Promise.all(fileUpdatePromises)
-    .then(() => console.info("File updated successfully."))
-    .catch(error => console.error(`Received error while updating the files: ${error}`));
+    .then(() => console.info("File updated successfully."));
 
   octokit.rest.pulls.create({
     owner: patchResult.issueInfo.repo_owner,
@@ -145,7 +149,9 @@ async function onPatchGenerationResult(message) {
     base: baseBranchName  // Or your target branch
   })
     .then(response => console.info(`Created a PR: ${response.data.html_url}`))
-    .catch(error => console.error(`Received error while creating a pull request: ${error}`))
+    .catch(error => {
+      throw new Error(`Received error while creating a pull request: ${error}`);
+    })
 }
 
 async function createBobTheBuilderResultSubscription() {
@@ -170,9 +176,9 @@ async function createPatchGenerationResultSubscription() {
   +and prints the message data.
   +
   +"""
-   import os
-   from google.cloud import pubsub_v1
-   `
+  import os
+  from google.cloud import pubsub_v1
+  `
   const message = {
     "issueInfo": {
       "repo_owner": "mathlilypeng",
