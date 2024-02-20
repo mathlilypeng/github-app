@@ -101,29 +101,22 @@ async function onPatchGenerationResult(message) {
     });
 
   // Process the unified diff
-  const patch = diff.parsePatch(patchResult.lastPatchResult.unifiedDiff);
-  const fileUpdatePromises = patch.map(filePatch => {
+  const fileUpdatePromises = patchResult.lastPatchResult.patchedFiles.map(patchedFile => {
     return octokit.rest.repos.getContent({
       owner: patchResult.taskInfo.repo_owner,
       repo: patchResult.taskInfo.repo_name,
-      path: filePatch.oldFileName.slice(2),
+      path: patchedFile.sourceFilePath,
       ref: baseBranchSha,
     }).catch(error => {
-      throw new Error(`Received error while getting content for ${filePatch.oldFileName}. Error: ${error}`);
+      throw new Error(`Received error while getting content for ${patchedFile.sourceFileName}. Error: ${error}`);
     })
       .then(response => {
-        const originalContent = Buffer.from(response.data.content, 'base64').toString('utf-8')
-        const update = diff.applyPatch(originalContent, filePatch)
-        if (update === false) {
-          throw new Error(`Failed to apply the patch.`)
-        }
-        const updatedContent = update
         return octokit.rest.repos.createOrUpdateFileContents({
           owner: patchResult.taskInfo.repo_owner,
           repo: patchResult.taskInfo.repo_name,
-          path: filePatch.oldFileName.slice(2),
+          path: patchedFile.sourceFilePath,
           message: `Fix for the issue #${patchResult.taskInfo.issue_number}`,
-          content: Buffer.from(updatedContent).toString('base64'),
+          content: Buffer.from(patchedFile.targetFileContent).toString('base64'),
           committer: {
             name: "AIDA",
             email: "github-actions@github.com"
@@ -134,7 +127,7 @@ async function onPatchGenerationResult(message) {
       })
       .catch(error => {
         throw new Error(`
-      Received error while updating ${filePatch.oldFileName} to ${filePatch.newFileName}. Error: ${error}`);
+      Received error while updating ${patchedFile.sourceFilePath} to ${patchedFile.targetFilePath}. Error: ${error}`);
       })
   })
 
@@ -146,9 +139,12 @@ async function onPatchGenerationResult(message) {
     repo: patchResult.taskInfo.repo_name,
     title: `Fix for issue #${patchResult.taskInfo.issue_number}`,
     head: newBranchName,
-    base: baseBranchName  // Or your target branch
+    base: baseBranchName,  // Or your target branch
+    body: `Fix for issue #${patchResult.taskInfo.issue_number}:
+     ${patchResult.taskInfo.issue_title}`
   })
     .then(response => console.info(`Created a PR: ${response.data.html_url}`))
+    .then(() => message.ack())
     .catch(error => {
       throw new Error(`Received error while creating a pull request: ${error}`);
     })
