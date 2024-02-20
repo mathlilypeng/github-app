@@ -11,6 +11,7 @@ import { createAppAuth } from '@octokit/auth-app'
 dotenv.config()
 
 const buildResultTopic = process.env.BOB_THE_BUILDER_RESULT_TOPIC
+const patchGenerationResultTopic = process.env.PATCH_GENERATION_RESULT_TOPIC
 const cloudProjectId = process.env.CLOUD_PROJECT_ID
 const appId = process.env.APP_ID
 const privateKeyPath = process.env.PRIVATE_KEY_PATH
@@ -66,22 +67,21 @@ async function onBobTheBuilderResult(message) {
 }
 
 async function onPatchGenerationResult(message) {
-  // const messageStr = message.data.toString('utf8')
-  // console.log(`Received message: ${messageStr}`);
-  // const patchResult = JSON.parse(messageStr)
-  const patchResult = message
+  const messageStr = message.data.toString('utf8')
+  console.log(`Received message: ${messageStr}`);
+  const patchResult = JSON.parse(messageStr)
   const octokit = new Octokit({
     authStrategy: createAppAuth, auth: {
       appId: appId,
       privateKey: privateKey,
-      installationId: patchResult.issueInfo.installation_id
+      installationId: patchResult.taskInfo.installation_id,
     }
   })
   // Get the base branch sha
   const baseBranchName = "main"
   const baseBranchSha = await octokit.rest.git.getRef({
-    owner: patchResult.issueInfo.repo_owner,
-    repo: patchResult.issueInfo.repo_name,
+    owner: patchResult.taskInfo.repo_owner,
+    repo: patchResult.taskInfo.repo_name,
     ref: `heads/${baseBranchName}`
   }).then(response => response.data.object.sha)
     .catch(error => {
@@ -89,10 +89,10 @@ async function onPatchGenerationResult(message) {
     });
 
   // Create a new branch based on the base branch sha
-  const newBranchName = `feature-${patchResult.issueInfo.issue_number}-${uuidv4()}`
+  const newBranchName = `feature-${patchResult.taskInfo.issue_number}-${uuidv4()}`
   await octokit.rest.git.createRef({
-    owner: patchResult.issueInfo.repo_owner,
-    repo: patchResult.issueInfo.repo_name,
+    owner: patchResult.taskInfo.repo_owner,
+    repo: patchResult.taskInfo.repo_name,
     ref: `refs/heads/${newBranchName}`,
     sha: baseBranchSha,
   }).then(() => console.log(`New branch '${newBranchName}' created successfully!`))
@@ -101,11 +101,11 @@ async function onPatchGenerationResult(message) {
     });
 
   // Process the unified diff
-  const patch = diff.parsePatch(patchResult.unifiedDiff);
+  const patch = diff.parsePatch(patchResult.lastPatchResult.unifiedDiff);
   const fileUpdatePromises = patch.map(filePatch => {
     return octokit.rest.repos.getContent({
-      owner: patchResult.issueInfo.repo_owner,
-      repo: patchResult.issueInfo.repo_name,
+      owner: patchResult.taskInfo.repo_owner,
+      repo: patchResult.taskInfo.repo_name,
       path: filePatch.oldFileName.slice(2),
       ref: baseBranchSha,
     }).catch(error => {
@@ -119,10 +119,10 @@ async function onPatchGenerationResult(message) {
         }
         const updatedContent = update
         return octokit.rest.repos.createOrUpdateFileContents({
-          owner: patchResult.issueInfo.repo_owner,
-          repo: patchResult.issueInfo.repo_name,
+          owner: patchResult.taskInfo.repo_owner,
+          repo: patchResult.taskInfo.repo_name,
           path: filePatch.oldFileName.slice(2),
-          message: `Fix for the issue #${patchResult.issueInfo.issue_number}`,
+          message: `Fix for the issue #${patchResult.taskInfo.issue_number}`,
           content: Buffer.from(updatedContent).toString('base64'),
           committer: {
             name: "AIDA",
@@ -142,9 +142,9 @@ async function onPatchGenerationResult(message) {
     .then(() => console.info("File updated successfully."));
 
   octokit.rest.pulls.create({
-    owner: patchResult.issueInfo.repo_owner,
-    repo: patchResult.issueInfo.repo_name,
-    title: `Fix for issue #${patchResult.issueInfo.issue_number}`,
+    owner: patchResult.taskInfo.repo_owner,
+    repo: patchResult.taskInfo.repo_name,
+    title: `Fix for issue #${patchResult.taskInfo.issue_number}`,
     head: newBranchName,
     base: baseBranchName  // Or your target branch
   })
@@ -164,31 +164,12 @@ async function createBobTheBuilderResultSubscription() {
 }
 
 async function createPatchGenerationResultSubscription() {
-  const unifiedDiff = dedent`
-  --- a/main.py
-  +++ b/main.py
-  @@ -1,3 +1,11 @@
-  +"""
-  +This script subscribes to a Pub/Sub topic and prints the message data.
-  +
-  +It uses the Google Cloud Pub/Sub library to create a subscriber client and
-  +subscribe to a topic. The callback function is called for each message received
-  +and prints the message data.
-  +
-  +"""
-  import os
-  from google.cloud import pubsub_v1
-  `
-  const message = {
-    "issueInfo": {
-      "repo_owner": "mathlilypeng",
-      "repo_name": "pubsub-hello-world",
-      "issue_number": 7,
-      "installation_id": 46978601,
-    },
-    "unifiedDiff": unifiedDiff
-  }
-  onPatchGenerationResult(message)
+  const pubsubClient = new PubSub({ cloudProjectId });
+  const subscription = pubsubClient.subscription(patchGenerationResultTopic)
+  // Start listening for messages
+  subscription.on('message', onPatchGenerationResult)
+  subscription.on('error', (error) => console.error(`Recived error while listening to ${patchGenerationResultTopic}. Error: ${error}`))
+  return subscription
 }
 
 export const subscriptions = {

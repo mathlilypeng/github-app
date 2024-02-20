@@ -53,7 +53,9 @@ app.webhooks.onError((error) => {
 const buildResultSubscription = await subscriptions.createBobTheBuilderResultSubscription()
 console.log(`Subscription created: ${buildResultSubscription.name}`);
 
-await subscriptions.createPatchGenerationResultSubscription()
+const patchGenerationResultSubscription =
+  await subscriptions.createPatchGenerationResultSubscription()
+console.log(`Subscription created: ${patchGenerationResultSubscription.name}`);
 
 // Launch a web server to listen for GitHub webhooks
 const port = process.env.PORT || 3000
