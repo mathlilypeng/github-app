@@ -33,6 +33,32 @@ function formatBuildResultMessage(buildResult) {
   return formattedMessages
 }
 
+function formatPatchResultMessage(patchResult) {
+  return `Unified Diff:
+  \`\`\`
+  ${escapeMarkdown(patchResult.lastPatchResult.unifiedDiff)}
+  \`\`\`
+
+  Error Message:
+  \`\`\`
+  ${escapeMarkdown(patchResult.lastPatchResult.error)}
+  \`\`\`
+  `
+}
+
+async function makeComment(octokit, repoOwner, repoName, issueNumber, commentBody) {
+  try {
+    await octokit.rest.issues.createComment({
+      owner: repoOwner,
+      repo: repoName,
+      issue_number: issueNumber,
+      body: commentBody
+    })
+  } catch (error) {
+    throw new Error(`Received error while posting a comment to the issue. Error: ${error}`);
+  }
+}
+
 
 // Handel the build result from Bob the Builder
 async function onBobTheBuilderResult(message) {
@@ -47,36 +73,16 @@ async function onBobTheBuilderResult(message) {
     }
   })
   const commentBody = formatBuildResultMessage(buildResult).join("\n")
-  try {
-    await octokit.rest.issues.createComment({
-      owner: buildResult.issueInfo.repo_owner,
-      repo: buildResult.issueInfo.repo_name,
-      issue_number: buildResult.issueInfo.issue_number,
-      body: commentBody
-    })
-  } catch (error) {
-    if (error.response) {
-      console.error(
-        `Error! Status: ${error.response.status}. Message: ${error.response.data.message}`)
-    } else {
-      console.error(`Received error while posting a comment to the issue: ${error.message}`)
-    }
-    return
-  }
+  makeComment(
+    octokit,
+    buildResult.issueInfo.repo_owner,
+    buildResult.issueInfo.repo_name,
+    buildResult.issueInfo.issue_number,
+    commentBody)
   message.ack();
 }
 
-async function onPatchGenerationResult(message) {
-  const messageStr = message.data.toString('utf8')
-  console.log(`Received message: ${messageStr}`);
-  const patchResult = JSON.parse(messageStr)
-  const octokit = new Octokit({
-    authStrategy: createAppAuth, auth: {
-      appId: appId,
-      privateKey: privateKey,
-      installationId: patchResult.taskInfo.installation_id,
-    }
-  })
+async function generatePullRequest(patchResult, octokit) {
   // Get the base branch sha
   const baseBranchName = "main"
   const baseBranchSha = await octokit.rest.git.getRef({
@@ -100,7 +106,6 @@ async function onPatchGenerationResult(message) {
       throw new Error(`Received error while creating a new branch ${newBranchName}. Error: ${error}`);
     });
 
-  // Process the unified diff
   const fileUpdatePromises = patchResult.lastPatchResult.patchedFiles.map(patchedFile => {
     return octokit.rest.repos.getContent({
       owner: patchResult.taskInfo.repo_owner,
@@ -144,10 +149,33 @@ async function onPatchGenerationResult(message) {
      ${patchResult.taskInfo.issue_title}`
   })
     .then(response => console.info(`Created a PR: ${response.data.html_url}`))
-    .then(() => message.ack())
     .catch(error => {
       throw new Error(`Received error while creating a pull request: ${error}`);
     })
+}
+
+async function onPatchGenerationResult(message) {
+  const messageStr = message.data.toString('utf8')
+  console.log(`Received message: ${messageStr}`);
+  const patchResult = JSON.parse(messageStr)
+  const octokit = new Octokit({
+    authStrategy: createAppAuth, auth: {
+      appId: appId,
+      privateKey: privateKey,
+      installationId: patchResult.taskInfo.installation_id,
+    }
+  })
+  if (patchResult.lastPatchResult.patchedFiles.length !== 0 && patchResult.lastPatchResult.error.length === 0) {
+    generatePullRequest(octokit, patchResult)
+  } else {
+    makeComment(
+      octokit,
+      patchResult.taskInfo.repo_owner,
+      patchResult.taskInfo.repo_name,
+      patchResult.taskInfo.issue_number,
+      formatPatchResultMessage(patchResult))
+  }
+  message.ack()
 }
 
 async function createBobTheBuilderResultSubscription() {
