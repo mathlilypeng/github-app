@@ -82,7 +82,7 @@ async function onBobTheBuilderResult(message) {
   message.ack();
 }
 
-async function generatePullRequest(patchResult, octokit) {
+async function generatePullRequest(octokit, patchResult) {
   // Get the base branch sha
   const baseBranchName = "main"
   const baseBranchSha = await octokit.rest.git.getRef({
