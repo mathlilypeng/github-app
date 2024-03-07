@@ -1,3 +1,4 @@
+# This is the main entry point for the app.
 import dotenv from 'dotenv'
 import fs from 'fs'
 import http from 'http'
